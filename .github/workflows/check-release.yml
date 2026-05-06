@@ -73,12 +73,12 @@ jobs:
             fi
 
             sha256=$(sha256sum "$file" | awk '{print $1}')
+            notes="Upstream release from https://download.live555.com/${file}"
+            notes="${notes}"$'\n\n'"sha256: \`${sha256}\`"
 
             gh release create "v${version}" "$file" \
               --title "live555 ${version}" \
-              --notes "Upstream release from https://download.live555.com/${file}
-
-sha256: \`${sha256}\`"
+              --notes "$notes"
 
             echo "$file" >> known-releases.txt
           done < /tmp/new-files.txt
