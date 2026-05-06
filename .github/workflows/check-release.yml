@@ -1,0 +1,67 @@
+name: Check for new live555 release
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch current file listing from download.live555.com
+        run: |
+          curl -sL https://download.live555.com/ \
+            | grep -oP 'live\.\d{4}\.\d{2}\.\d{2}\.tar\.gz' \
+            | sort -u > /tmp/remote-files.txt
+          echo "Remote files:"
+          cat /tmp/remote-files.txt
+
+      - name: Compare with known releases
+        id: diff
+        run: |
+          touch known-releases.txt
+          comm -23 /tmp/remote-files.txt known-releases.txt > /tmp/new-files.txt
+          if [ -s /tmp/new-files.txt ]; then
+            echo "new=true" >> "$GITHUB_OUTPUT"
+            echo "New releases found:"
+            cat /tmp/new-files.txt
+          else
+            echo "new=false" >> "$GITHUB_OUTPUT"
+            echo "No new releases."
+          fi
+
+      - name: Download and publish new releases
+        if: steps.diff.outputs.new == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          while IFS= read -r file; do
+            version="${file%.tar.gz}"
+            version="${version#live.}"
+            echo "Processing $file (version $version)"
+
+            curl -sLO "https://download.live555.com/$file"
+
+            gh release create "v${version}" "$file" \
+              --title "live555 ${version}" \
+              --notes "Upstream release from https://download.live555.com/${file}"
+
+            echo "$file" >> known-releases.txt
+          done < /tmp/new-files.txt
+
+          sort -u -o known-releases.txt known-releases.txt
+
+      - name: Commit updated release list
+        if: steps.diff.outputs.new == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add known-releases.txt
+          git commit -m "track release $(tail -1 /tmp/new-files.txt)"
+          git push
