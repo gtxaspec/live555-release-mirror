@@ -16,11 +16,22 @@ jobs:
 
       - name: Fetch current file listing from download.live555.com
         run: |
-          curl -sL https://download.live555.com/ \
-            | grep -oP 'live\.\d{4}\.\d{2}\.\d{2}\.tar\.gz' \
-            | sort -u > /tmp/remote-files.txt
-          echo "Remote files:"
-          cat /tmp/remote-files.txt
+          for attempt in $(seq 1 5); do
+            if curl -sL --retry 3 --retry-delay 5 --max-time 30 \
+              https://download.live555.com/ \
+              | grep -oP 'live\.\d{4}\.\d{2}\.\d{2}\.tar\.gz' \
+              | sort -u > /tmp/remote-files.txt && [ -s /tmp/remote-files.txt ]; then
+              echo "Remote files:"
+              cat /tmp/remote-files.txt
+              break
+            fi
+            echo "Attempt $attempt failed, retrying in 15s..."
+            sleep 15
+          done
+          if [ ! -s /tmp/remote-files.txt ]; then
+            echo "Failed to fetch file listing after 5 attempts"
+            exit 1
+          fi
 
       - name: Compare with known releases
         id: diff
@@ -46,7 +57,20 @@ jobs:
             version="${version#live.}"
             echo "Processing $file (version $version)"
 
-            curl -sLO "https://download.live555.com/$file"
+            for attempt in $(seq 1 5); do
+              if curl -sL --retry 3 --retry-delay 5 --max-time 120 \
+                -o "$file" "https://download.live555.com/$file" && [ -s "$file" ]; then
+                echo "Downloaded $file"
+                break
+              fi
+              echo "Download attempt $attempt failed, retrying in 15s..."
+              sleep 15
+            done
+
+            if [ ! -s "$file" ]; then
+              echo "Failed to download $file after 5 attempts"
+              exit 1
+            fi
 
             gh release create "v${version}" "$file" \
               --title "live555 ${version}" \
